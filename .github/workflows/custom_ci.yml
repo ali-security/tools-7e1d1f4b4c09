@@ -1,0 +1,131 @@
+# Upstream golang.org/x/tools has no GitHub Actions CI (it is tested on the Go
+# build dashboard), so this workflow is authored from scratch. It packages the
+# module zip exactly as proxy.golang.org serves it, and runs the project's own
+# `go test ./...` on Linux and Windows.
+name: CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Optional go test package pattern / -run selector; empty runs the full suite"
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  module-zip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Build module zip helper (outside the checkout)
+        run: |
+          helper_dir="$(mktemp -d)"
+          cp .github/create_mod.go "$helper_dir/"
+          cd "$helper_dir"
+          go mod init example.com/mod
+          go get golang.org/x/mod@v0.24.0
+          go build -o "$RUNNER_TEMP/create_mod" .
+
+      - name: Create module zip
+        run: |
+          # Upstream ships no .github directory; ours must not leak into the
+          # zip. .gitignore/.gitattributes are upstream files and are kept.
+          rm -rf "$GITHUB_WORKSPACE/.github"
+          mkdir -p "$RUNNER_TEMP/out"
+          "$RUNNER_TEMP/create_mod" golang.org/x/tools v0.0.0-20191119224855-298f0cb1881e "$GITHUB_WORKSPACE" "$RUNNER_TEMP/out/v0.0.0-20191119224855-298f0cb1881e.zip"
+          unzip -l "$RUNNER_TEMP/out/v0.0.0-20191119224855-298f0cb1881e.zip" | tail -3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: module-zip
+          path: ${{ runner.temp }}/out/v0.0.0-20191119224855-298f0cb1881e.zip
+          if-no-files-found: error
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Go 1.12 is the release-era toolchain for this go.mod (`go 1.11`).
+          - os: ubuntu-latest
+            go: '1.12.17'
+          # Windows uses Go 1.13: Go 1.12 go/packages module tests flake on
+          # Windows with go.mod rename / file-in-use errors; the robustio
+          # retries that fix them arrived in Go 1.13.
+          - os: windows-latest
+            go: '1.13.15'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      GO111MODULE: 'on'
+      GOPROXY: https://proxy.golang.org
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      # Go 1.12/1.13 prebuilt runtime/cgo needs msvcrt's __iob_func; the
+      # runner's preinstalled C:\mingw64 gcc is UCRT, so cgo links fail
+      # (e.g. the cmd/stringer cgo end-to-end test). Use MSYS2's MINGW64
+      # (msvcrt) gcc instead.
+      - name: Install MINGW64 gcc
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
+
+      - name: Configure Windows toolchain and temp dir
+        if: runner.os == 'Windows'
+        run: |
+          echo "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin" >> "$GITHUB_PATH"
+          # The default TEMP is an 8.3 short path (RUNNER~1), which breaks
+          # path comparisons in tests.
+          echo "TEMP=${{ runner.temp }}" >> "$GITHUB_ENV"
+          echo "TMP=${{ runner.temp }}" >> "$GITHUB_ENV"
+
+      - name: Toolchain info
+        run: |
+          gcc --version
+          go version
+          go env
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: |
+          set -o pipefail
+          go test -v ${{ inputs.test-filter || './...' }} 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+
+      - name: Test summary
+        run: |
+          awk '
+            /^ok /       { pkg_ok++ }
+            /^FAIL/      { pkg_fail++ }
+            /--- PASS:/  { t_pass++ }
+            /--- FAIL:/  { t_fail++ }
+            /--- SKIP:/  { t_skip++ }
+            END {
+              printf "Test summary: packages ok=%d failed=%d; tests passed=%d failed=%d skipped=%d\n", pkg_ok, pkg_fail, t_pass, t_fail, t_skip
+            }
+          ' "$RUNNER_TEMP/go-test.log"

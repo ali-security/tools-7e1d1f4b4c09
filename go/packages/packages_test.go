@@ -1193,6 +1193,9 @@ const A = 1
 }
 
 func TestAdHocOverlays(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Issue #31344: the ad-hoc command-line-arguments package isn't created on windows")
+	}
 	testenv.NeedsTool(t, "go")
 
 	// This test doesn't use packagestest because we are testing ad-hoc packages,
@@ -2110,6 +2113,9 @@ func testBasicXTest(t *testing.T, exporter packagestest.Exporter) {
 
 func TestErrorMissingFile(t *testing.T) { packagestest.TestAll(t, testErrorMissingFile) }
 func testErrorMissingFile(t *testing.T, exporter packagestest.Exporter) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Issue #31344: the ad-hoc command-line-arguments package isn't created on windows")
+	}
 	exported := packagestest.Export(t, exporter, []packagestest.Module{{
 		Name: "golang.org/fake",
 		Files: map[string]interface{}{
@@ -2138,6 +2144,9 @@ func TestReturnErrorWhenUsingNonGoFiles(t *testing.T) {
 	packagestest.TestAll(t, testReturnErrorWhenUsingNonGoFiles)
 }
 func testReturnErrorWhenUsingNonGoFiles(t *testing.T, exporter packagestest.Exporter) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Issue #31344: the ad-hoc command-line-arguments package isn't created on windows")
+	}
 	exported := packagestest.Export(t, exporter, []packagestest.Module{{
 		Name: "golang.org/gopatha",
 		Files: map[string]interface{}{

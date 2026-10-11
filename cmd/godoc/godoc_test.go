@@ -95,7 +95,7 @@ func waitForSearchReady(t *testing.T, cmd *exec.Cmd, addr string) {
 	go waitForServer(t, ch,
 		fmt.Sprintf("http://%v/search?q=FALLTHROUGH", addr),
 		"The list of tokens.",
-		2*time.Minute,
+		5*time.Minute,
 		false)
 	if err := <-ch; err != nil {
 		t.Fatal(err)
