@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/tools/go/packages/packagestest"
 	"golang.org/x/tools/internal/lsp/cmd"
@@ -58,6 +61,45 @@ func TestDefinitionHelpExample(t *testing.T) {
 		})
 		if !expect.MatchString(got) {
 			t.Errorf("test with %v\nexpected:\n%s\ngot:\n%s", args, expect, got)
+		}
+	}
+}
+
+// TestServeListenImplicitAllInterfaces checks that -listen rejects an
+// address with no host (e.g. ":12345"), which would implicitly bind all
+// network interfaces.
+func TestServeListenImplicitAllInterfaces(t *testing.T) {
+	for _, args := range [][]string{
+		{"serve", "-listen=:0"},
+		// The serve flags are also accepted without the serve verb.
+		{"-listen=:0"},
+	} {
+		errc := make(chan error, 1)
+		go func(args []string) {
+			errc <- tool.Run(tests.Context(t), cmd.New("gopls-test", "", nil, nil), args)
+		}(args)
+		select {
+		case err := <-errc:
+			if err == nil || !strings.Contains(err.Error(), "implicitly binds all network interfaces") {
+				t.Errorf("gopls %v: got error %v, want rejection of the implicit all-interfaces address", args, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Errorf("gopls %v: server was started listening on all network interfaces", args)
+		}
+	}
+}
+
+// TestServeNoPortFlag checks that the -port debugging flag, which listened
+// on all network interfaces, is no longer provided.
+func TestServeNoPortFlag(t *testing.T) {
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(cmd.Serve{}),
+		reflect.TypeOf(cmd.Application{}),
+	} {
+		for i := 0; i < typ.NumField(); i++ {
+			if f := typ.Field(i); f.Tag.Get("flag") == "port" {
+				t.Errorf("%v.%s declares the -port flag", typ, f.Name)
+			}
 		}
 	}
 }

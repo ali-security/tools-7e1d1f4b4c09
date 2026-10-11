@@ -7,7 +7,6 @@ package lsp
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sync"
 
@@ -33,12 +32,6 @@ func NewServer(ctx context.Context, cache source.Cache, stream jsonrpc2.Stream) 
 	ctx, s.Conn, s.client = protocol.NewServer(ctx, stream, s)
 	s.session = cache.NewSession(ctx)
 	return ctx, s
-}
-
-// RunServerOnPort starts an LSP server on the given port and does not exit.
-// This function exists for debugging purposes.
-func RunServerOnPort(ctx context.Context, cache source.Cache, port int, h func(ctx context.Context, s *Server)) error {
-	return RunServerOnAddress(ctx, cache, fmt.Sprintf(":%v", port), h)
 }
 
 // RunServerOnPort starts an LSP server on the given port and does not exit.
